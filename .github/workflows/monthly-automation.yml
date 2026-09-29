@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       assignment:
-        description: "Assignment to create"
+        description: "Assignment key or name from config/automated-assignments.yml"
         required: true
         type: string
       month:
@@ -50,6 +50,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Determine month
         id: period
         shell: bash
@@ -60,20 +63,40 @@ jobs:
           fi
           echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
 
-      - name: Get assignment team
+      - name: Load assignment from config
         id: assignment
         shell: bash
         run: |
-          # Replace with real config logic
-          PROGRAMMER="user01"
-          PROGRAMMER2="user02"
-          CHECKER="user03"
-          CHECKER4="user04"
+          set -euo pipefail
+
+          CONFIG_PATH="config/automated-assignments.yml"
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "ERROR: $CONFIG_PATH not found in repository"
+            exit 1
+          fi
+
+          INPUT="${{ inputs.assignment }}"
+
+          CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/automated-assignments.yml").to_json')
+
+          ASSIGNMENT_JSON=$(echo "$CONFIG_JSON" | jq -r --arg k "$INPUT" '(.assignments[$k]) // (.assignments[] | select(.name == $k)) // empty')
+
+          if [ -z "$ASSIGNMENT_JSON" ]; then
+            echo "ERROR: assignment '$INPUT' not found in $CONFIG_PATH"
+            exit 1
+          fi
+
+          PROGRAMMER=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer // empty')
+          PROGRAMMER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer2 // empty')
+          CHECKER=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker // empty')
+          CHECKER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker2 // empty')
+          ASSIGNMENT_NAME=$(echo "$ASSIGNMENT_JSON" | jq -r '.name // empty')
 
           echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
           echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
           echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
-          echo "checker2=$CHECKER4" >> "$GITHUB_OUTPUT"
+          echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
+          echo "assignment_name=$ASSIGNMENT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Validate assignments
         shell: bash
@@ -102,7 +125,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PERIOD: ${{ steps.period.outputs.period }}
-          ASSIGNMENT: ${{ inputs.assignment }}
+          INPUT_ASSIGNMENT: ${{ inputs.assignment }}
+          ASSIGNMENT: ${{ steps.assignment.outputs.assignment_name }}
           PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
           PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
           CHECKER: ${{ steps.assignment.outputs.checker }}
@@ -112,6 +136,10 @@ jobs:
           STATUS: ${{ inputs.status }}
         shell: bash
         run: |
+          if [ -z "${ASSIGNMENT}" ]; then
+            ASSIGNMENT="${INPUT_ASSIGNMENT}"
+          fi
+
           TITLE="Monthly Assignment - ${ASSIGNMENT} - ${PERIOD}"
 
           EXISTING=$(gh issue list \
