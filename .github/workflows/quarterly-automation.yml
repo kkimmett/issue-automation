@@ -1,0 +1,177 @@
+name: Create Quarterly Issue
+on:
+schedule:
+# 09:00 UTC on the first day of Jan, Apr, Jul, Oct
+cron: "0 9 1 1,4,7,10 "
+workflow_dispatch:
+inputs:
+quarter:
+description: "Quarter (YYYY-Q#). Leave blank for current quarter."
+required: false
+type: string
+due_date:
+description: "Due date (YYYY-MM-DD)"
+required: true
+type: string
+priority:
+description: "Priority"
+required: true
+type: choice
+options:
+Low
+Medium
+High
+Critical
+default: Medium
+status:
+description: "Status"
+required: true
+type: choice
+options:
+Not Started
+In Progress
+Complete
+default: Not Started
+permissions:
+contents: read
+issues: write
+jobs:
+create-quarterly-issue:
+runs-on: ubuntu-latest
+steps:
+# ------------------------------------------------------------
+# Determine quarter
+# ------------------------------------------------------------
+name: Determine quarter
+id: period
+shell: bash
+run: |
+if [ -n "${{ inputs.quarter }}" ]; then
+PERIOD="${{ inputs.quarter }}"
+else
+YEAR=$(date -u +%Y)
+MONTH=$(date -u +%-m)
+QUARTER=$(( (MONTH - 1) / 3 + 1 ))
+PERIOD="${YEAR}-Q${QUARTER}"
+fi
+echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
+# ------------------------------------------------------------
+# TODO:
+# Retrieve the appropriate quarterly assignment/team.
+#
+# Quarterly assignments do NOT rotate automatically.
+# ------------------------------------------------------------
+name: Get quarterly assignment team
+id: assignment
+shell: bash
+run: |
+# PLACEHOLDERS FOR NOW
+PROGRAMMER="REPLACE_ME"
+PROGRAMMER2="REPLACE_ME"
+CHECKER="REPLACE_ME"
+CHECKER2="REPLACE_ME"
+echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
+echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
+echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
+echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
+# ------------------------------------------------------------
+# Validate distinct users
+# ------------------------------------------------------------
+name: Validate assignments
+shell: bash
+env:
+PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+CHECKER: ${{ steps.assignment.outputs.checker }}
+CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+run: |
+values=(
+"$PROGRAMMER"
+"$PROGRAMMER2"
+"$CHECKER"
+"$CHECKER2"
+)
+unique=$(printf "%s
+" "${values[@]}" | sort -u | wc -l)
+if [ "$unique" -ne 4 ]; then
+echo "ERROR: The four roles must have different users."
+exit 1
+fi
+# ------------------------------------------------------------
+# Create quarterly issue
+# ------------------------------------------------------------
+name: Create quarterly issue
+env:
+GH_TOKEN: ${{ github.token }}
+REPO: ${{ github.repository }}
+PERIOD: ${{ steps.period.outputs.period }}
+PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+CHECKER: ${{ steps.assignment.outputs.checker }}
+CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+DUE_DATE: ${{ inputs.due_date }}
+PRIORITY: ${{ inputs.priority }}
+STATUS: ${{ inputs.status }}
+shell: bash
+run: |
+TITLE="Quarterly Review - ${PERIOD}"
+# Prevent duplicate quarterly issues
+EXISTING=$(gh issue list \
+--repo "$REPO" \
+--state all \
+--search ""$TITLE" in:title" \
+--json number \
+--jq 'length')
+if [ "$EXISTING" -gt 0 ]; then
+echo "Issue already exists: $TITLE"
+exit 0
+fi
+gh issue create \
+--repo "$REPO" \
+--title "$TITLE" \
+--label "Quarterly Review" \
+--assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
+--body "$(cat <<EOF
+## Quarterly Review
+Quarter: ${PERIOD}
+## Team
+| Role | GitHub Username |
+|---|---|
+| Programmer | @${PROGRAMMER} |
+| Programmer 2 | @${PROGRAMMER2} |
+| Checker | @${CHECKER} |
+| Checker 2 | @${CHECKER2} |
+## Metadata
+| Field | Value |
+|---|---|
+| Assigned Date | $(date -u +%Y-%m-%d) |
+| Due Date | ${DUE_DATE} |
+| Status | ${STATUS} |
+| Priority | ${PRIORITY} |
+## Quarterly Review
+[ ] Review previous quarter
+[ ] Review outstanding work
+[ ] Review metrics
+[ ] Identify issues and risks
+[ ] Establish next-quarter priorities
+## Notes
+
+## Action Items
+| Action | Owner | Due Date |
+|---|---|---|
+| | | |
+EOF
+)"
+# ------------------------------------------------------------
+# TODO:
+# Populate GitHub Project custom fields here.
+#
+# Programmer
+# Programmer 2
+# Checker
+# Checker 2
+# Assigned Date
+# Due Date
+# Status
+# Priority
+# ------------------------------------------------------------
