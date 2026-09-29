@@ -1,0 +1,189 @@
+name: Create Monthly Assignment Issues
+on:
+schedule:
+# 09:00 UTC on the first day of every month
+cron: "0 9 1 * "
+workflow_dispatch:
+inputs:
+assignment:
+description: "Assignment to create"
+required: true
+type: string
+month:
+description: "Month to create (YYYY-MM). Leave blank for current month."
+required: false
+type: string
+due_date:
+description: "Due date (YYYY-MM-DD)"
+required: true
+type: string
+priority:
+description: "Priority"
+required: true
+type: choice
+options:
+Low
+Medium
+High
+Critical
+default: Medium
+status:
+description: "Status"
+required: true
+type: choice
+options:
+Not Started
+In Progress
+Complete
+default: Not Started
+permissions:
+contents: read
+issues: write
+jobs:
+create-monthly-issue:
+runs-on: ubuntu-latest
+steps:
+# ------------------------------------------------------------
+# Determine the month
+# ------------------------------------------------------------
+name: Determine month
+id: period
+shell: bash
+run: |
+if [ -n "${{ inputs.month }}" ]; then
+PERIOD="${{ inputs.month }}"
+else
+PERIOD=$(date -u +%Y-%m)
+fi
+echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
+# ------------------------------------------------------------
+# TODO:
+# Read the selected assignment from an assignment configuration
+# file.
+#
+# Example:
+#
+# Assignment A:
+# programmer: user01
+# programmer2: user02
+# checker: user03
+# checker2: user04
+#
+# Assignments persist until manually changed.
+# There is NO automatic rotation.
+# ------------------------------------------------------------
+name: Get assignment team
+id: assignment
+shell: bash
+run: |
+# PLACEHOLDERS FOR NOW
+PROGRAMMER="REPLACE_ME"
+PROGRAMMER2="REPLACE_ME"
+CHECKER="REPLACE_ME"
+CHECKER2="REPLACE_ME"
+echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
+echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
+echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
+echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
+# ------------------------------------------------------------
+# Make sure the four roles are different people
+# ------------------------------------------------------------
+name: Validate assignments
+shell: bash
+env:
+PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+CHECKER: ${{ steps.assignment.outputs.checker }}
+CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+run: |
+values=(
+"$PROGRAMMER"
+"$PROGRAMMER2"
+"$CHECKER"
+"$CHECKER2"
+)
+unique=$(printf "%s
+" "${values[@]}" | sort -u | wc -l)
+if [ "$unique" -ne 4 ]; then
+echo "ERROR: The four roles must have different users."
+exit 1
+fi
+# ------------------------------------------------------------
+# Create issue
+# ------------------------------------------------------------
+name: Create monthly issue
+env:
+GH_TOKEN: ${{ github.token }}
+REPO: ${{ github.repository }}
+PERIOD: ${{ steps.period.outputs.period }}
+ASSIGNMENT: ${{ inputs.assignment }}
+PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+CHECKER: ${{ steps.assignment.outputs.checker }}
+CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+DUE_DATE: ${{ inputs.due_date }}
+PRIORITY: ${{ inputs.priority }}
+STATUS: ${{ inputs.status }}
+shell: bash
+run: |
+TITLE="Monthly Assignment - ${ASSIGNMENT} - ${PERIOD}"
+# Prevent duplicate monthly issues
+EXISTING=$(gh issue list \
+--repo "$REPO" \
+--state all \
+--search ""$TITLE" in:title" \
+--json number \
+--jq 'length')
+if [ "$EXISTING" -gt 0 ]; then
+echo "Issue already exists: $TITLE"
+exit 0
+fi
+gh issue create \
+--repo "$REPO" \
+--title "$TITLE" \
+--label "Monthly Assignment" \
+--assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
+--body "$(cat <<EOF
+## Monthly Assignment
+Assignment: ${ASSIGNMENT}
+Period: ${PERIOD}
+## Team
+| Role | GitHub Username |
+|---|---|
+| Programmer | @${PROGRAMMER} |
+| Programmer 2 | @${PROGRAMMER2} |
+| Checker | @${CHECKER} |
+| Checker 2 | @${CHECKER2} |
+## Metadata
+| Field | Value |
+|---|---|
+| Assigned Date | $(date -u +%Y-%m-%d) |
+| Due Date | ${DUE_DATE} |
+| Status | ${STATUS} |
+| Priority | ${PRIORITY} |
+## Tasks
+[ ] Complete monthly assignment
+[ ] Programmer review
+[ ] Checker review
+[ ] Finalize
+## Notes
+
+## Action Items
+| Action | Owner | Due Date |
+|---|---|---|
+| | | |
+EOF
+)"
+# ------------------------------------------------------------
+# TODO:
+# Populate GitHub Project custom fields here.
+#
+# Programmer
+# Programmer 2
+# Checker
+# Checker 2
+# Assigned Date
+# Due Date
+# Status
+# Priority
+# ------------------------------------------------------------
