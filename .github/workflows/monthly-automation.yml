@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       assignment:
-        description: "Assignment key or name from config/automated-assignments.yml"
+        description: "Assignment key or name from config/monthly-assignments.yml"
         required: true
         type: string
       month:
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          CONFIG_PATH="config/automated-assignments.yml"
+          CONFIG_PATH="config/monthly-assignments.yml"
           if [ ! -f "$CONFIG_PATH" ]; then
             echo "ERROR: $CONFIG_PATH not found in repository"
             exit 1
@@ -77,7 +77,7 @@ jobs:
 
           INPUT="${{ inputs.assignment }}"
 
-          CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/automated-assignments.yml").to_json')
+          CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/monthly-assignments.yml").to_json')
 
           ASSIGNMENT_JSON=$(echo "$CONFIG_JSON" | jq -r --arg k "$INPUT" '(.assignments[$k]) // (.assignments[] | select(.name == $k)) // empty')
 
