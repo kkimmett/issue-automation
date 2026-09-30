@@ -1,21 +1,21 @@
 assignments:
 
   assignment_1:
-    name: "Assignment 1"
+    name: "Monthly Assignment 1"
     programmer: "user01"
     programmer2: "user02"
     checker: "user03"
     checker2: "user04"
 
   assignment_2:
-    name: "Assignment 2"
+    name: "Monthly Assignment 2"
     programmer: "user05"
     programmer2: "user06"
     checker: "user07"
     checker2: "user08"
 
   assignment_3:
-    name: "Assignment 3"
+    name: "Monthly Assignment 3"
     programmer: "user01"
     programmer2: "user09"
     checker: "user10"
