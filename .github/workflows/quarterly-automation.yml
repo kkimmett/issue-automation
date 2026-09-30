@@ -1,139 +1,172 @@
 name: Create Quarterly Issue
+
 on:
-schedule:
-# 09:00 UTC on the first day of Jan, Apr, Jul, Oct
-cron: "0 9 1 1,4,7,10 "
-workflow_dispatch:
-inputs:
-quarter:
-description: "Quarter (YYYY-Q#). Leave blank for current quarter."
-required: false
-type: string
-due_date:
-description: "Due date (YYYY-MM-DD)"
-required: true
-type: string
-priority:
-description: "Priority"
-required: true
-type: choice
-options:
-Low
-Medium
-High
-Critical
-default: Medium
-status:
-description: "Status"
-required: true
-type: choice
-options:
-Not Started
-In Progress
-Complete
-default: Not Started
+  schedule:
+    - cron: "0 9 1 1,4,7,10"  # 09:00 UTC on the first day of Jan, Apr, Jul, Oct
+  workflow_dispatch:
+    inputs:
+      assignment:
+        description: "Assignment key or name from config/quarterly-assignments.yml"
+        required: true
+        type: string
+      quarter:
+        description: "Quarter (YYYY-Q#). Leave blank for current quarter."
+        required: false
+        type: string
+      due_date:
+        description: "Due date (YYYY-MM-DD)"
+        required: true
+        type: string
+      priority:
+        description: "Priority"
+        required: true
+        type: choice
+        options:
+          - Low
+          - Medium
+          - High
+          - Critical
+        default: Medium
+      status:
+        description: "Status"
+        required: true
+        type: choice
+        options:
+          - Not Started
+          - In Progress
+          - Complete
+        default: Not Started
+
 permissions:
-contents: read
-issues: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: quarterly-review-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
-create-quarterly-issue:
-runs-on: ubuntu-latest
-steps:
-# ------------------------------------------------------------
-# Determine quarter
-# ------------------------------------------------------------
-name: Determine quarter
-id: period
-shell: bash
-run: |
-if [ -n "${{ inputs.quarter }}" ]; then
-PERIOD="${{ inputs.quarter }}"
-else
-YEAR=$(date -u +%Y)
-MONTH=$(date -u +%-m)
-QUARTER=$(( (MONTH - 1) / 3 + 1 ))
-PERIOD="${YEAR}-Q${QUARTER}"
-fi
-echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
-# ------------------------------------------------------------
-# TODO:
-# Retrieve the appropriate quarterly assignment/team.
-#
-# Quarterly assignments do NOT rotate automatically.
-# ------------------------------------------------------------
-name: Get quarterly assignment team
-id: assignment
-shell: bash
-run: |
-# PLACEHOLDERS FOR NOW
-PROGRAMMER="REPLACE_ME"
-PROGRAMMER2="REPLACE_ME"
-CHECKER="REPLACE_ME"
-CHECKER2="REPLACE_ME"
-echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
-echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
-echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
-echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
-# ------------------------------------------------------------
-# Validate distinct users
-# ------------------------------------------------------------
-name: Validate assignments
-shell: bash
-env:
-PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
-PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
-CHECKER: ${{ steps.assignment.outputs.checker }}
-CHECKER2: ${{ steps.assignment.outputs.checker2 }}
-run: |
-values=(
-"$PROGRAMMER"
-"$PROGRAMMER2"
-"$CHECKER"
-"$CHECKER2"
-)
-unique=$(printf "%s
-" "${values[@]}" | sort -u | wc -l)
-if [ "$unique" -ne 4 ]; then
-echo "ERROR: The four roles must have different users."
-exit 1
-fi
-# ------------------------------------------------------------
-# Create quarterly issue
-# ------------------------------------------------------------
-name: Create quarterly issue
-env:
-GH_TOKEN: ${{ github.token }}
-REPO: ${{ github.repository }}
-PERIOD: ${{ steps.period.outputs.period }}
-PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
-PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
-CHECKER: ${{ steps.assignment.outputs.checker }}
-CHECKER2: ${{ steps.assignment.outputs.checker2 }}
-DUE_DATE: ${{ inputs.due_date }}
-PRIORITY: ${{ inputs.priority }}
-STATUS: ${{ inputs.status }}
-shell: bash
-run: |
-TITLE="Quarterly Review - ${PERIOD}"
-# Prevent duplicate quarterly issues
-EXISTING=$(gh issue list \
---repo "$REPO" \
---state all \
---search ""$TITLE" in:title" \
---json number \
---jq 'length')
-if [ "$EXISTING" -gt 0 ]; then
-echo "Issue already exists: $TITLE"
-exit 0
-fi
-gh issue create \
---repo "$REPO" \
---title "$TITLE" \
---label "Quarterly Review" \
---assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
---body "$(cat <<EOF
+  create-quarterly-issue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine quarter
+        id: period
+        shell: bash
+        run: |
+          PERIOD="${{ inputs.quarter }}"
+          if [ -z "$PERIOD" ]; then
+            YEAR=$(date -u +%Y)
+            MONTH=$(date -u +%-m)
+            QUARTER=$(((MONTH - 1) / 3 + 1))
+            PERIOD="${YEAR}-Q${QUARTER}"
+          fi
+          echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
+
+      - name: Load assignment from config
+        id: assignment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG_PATH="config/quarterly-assignments.yml"
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "ERROR: $CONFIG_PATH not found in repository"
+            exit 1
+          fi
+
+          INPUT="${{ inputs.assignment }}"
+
+          CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/quarterly-assignments.yml").to_json')
+
+          ASSIGNMENT_JSON=$(echo "$CONFIG_JSON" | jq -r --arg k "$INPUT" '(.assignments[$k]) // (.assignments[] | select(.name == $k)) // empty')
+
+          if [ -z "$ASSIGNMENT_JSON" ]; then
+            echo "ERROR: assignment '$INPUT' not found in $CONFIG_PATH"
+            exit 1
+          fi
+
+          PROGRAMMER=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer // empty')
+          PROGRAMMER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer2 // empty')
+          CHECKER=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker // empty')
+          CHECKER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker2 // empty')
+          ASSIGNMENT_NAME=$(echo "$ASSIGNMENT_JSON" | jq -r '.name // empty')
+
+          echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
+          echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
+          echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
+          echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
+          echo "assignment_name=$ASSIGNMENT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Validate assignments
+        shell: bash
+        env:
+          PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+          PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+          CHECKER: ${{ steps.assignment.outputs.checker }}
+          CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+        run: |
+          values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
+          for v in "${values[@]}"; do
+            if [ -z "$v" ]; then
+              echo "ERROR: All assignment roles must be set."
+              exit 1
+            fi
+          done
+
+          unique=$(printf '%s\n' "${values[@]}" | sort -u | wc -l)
+          if [ "$unique" -ne 4 ]; then
+            echo "ERROR: The four roles must have different users."
+            exit 1
+          fi
+
+      - name: Create quarterly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PERIOD: ${{ steps.period.outputs.period }}
+          INPUT_ASSIGNMENT: ${{ inputs.assignment }}
+          ASSIGNMENT: ${{ steps.assignment.outputs.assignment_name }}
+          PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
+          PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
+          CHECKER: ${{ steps.assignment.outputs.checker }}
+          CHECKER2: ${{ steps.assignment.outputs.checker2 }}
+          DUE_DATE: ${{ inputs.due_date }}
+          PRIORITY: ${{ inputs.priority }}
+          STATUS: ${{ inputs.status }}
+        shell: bash
+        run: |
+          if [ -z "${ASSIGNMENT}" ]; then
+            ASSIGNMENT="${INPUT_ASSIGNMENT}"
+          fi
+
+          TITLE="Quarterly Review - ${ASSIGNMENT} - ${PERIOD}"
+
+          EXISTING=$(gh issue list \
+            --repo "$REPO" \
+            --state all \
+            --search "\"$TITLE\" in:title" \
+            --json number \
+            --jq 'length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Issue already exists: $TITLE"
+            exit 0
+          fi
+
+          gh issue create \
+            --repo "$REPO" \
+            --title "$TITLE" \
+            --label "Quarterly Review" \
+            --assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
+            --body "$(cat <<EOF
 ## Quarterly Review
+Assignment: ${ASSIGNMENT}
 Quarter: ${PERIOD}
+
 ## Team
 | Role | GitHub Username |
 |---|---|
@@ -141,6 +174,7 @@ Quarter: ${PERIOD}
 | Programmer 2 | @${PROGRAMMER2} |
 | Checker | @${CHECKER} |
 | Checker 2 | @${CHECKER2} |
+
 ## Metadata
 | Field | Value |
 |---|---|
@@ -148,12 +182,14 @@ Quarter: ${PERIOD}
 | Due Date | ${DUE_DATE} |
 | Status | ${STATUS} |
 | Priority | ${PRIORITY} |
+
 ## Quarterly Review
-[ ] Review previous quarter
-[ ] Review outstanding work
-[ ] Review metrics
-[ ] Identify issues and risks
-[ ] Establish next-quarter priorities
+- [ ] Review previous quarter
+- [ ] Review outstanding work
+- [ ] Review metrics
+- [ ] Identify issues and risks
+- [ ] Establish next-quarter priorities
+
 ## Notes
 
 ## Action Items
@@ -162,16 +198,3 @@ Quarter: ${PERIOD}
 | | | |
 EOF
 )"
-# ------------------------------------------------------------
-# TODO:
-# Populate GitHub Project custom fields here.
-#
-# Programmer
-# Programmer 2
-# Checker
-# Checker 2
-# Assigned Date
-# Due Date
-# Status
-# Priority
-# ------------------------------------------------------------
