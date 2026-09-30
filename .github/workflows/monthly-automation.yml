@@ -189,9 +189,6 @@ jobs:
 Assignment: ${ASSIGNMENT}
 Period: ${PERIOD}
 
-## Team
-${TEAM_TABLE}
-
 ## Metadata
 | Field | Value |
 |---|---|
