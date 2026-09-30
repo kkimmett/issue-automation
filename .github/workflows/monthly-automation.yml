@@ -180,7 +180,7 @@ jobs:
             | Action | Owner | Due Date |
             |---|---|---|
             | | | |
-            EOF
+          EOF
 
             gh issue create \
               --repo "$REPO" \
