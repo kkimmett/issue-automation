@@ -7,7 +7,7 @@ on:
     inputs:
       assignment:
         description: "Assignment key or name from config/monthly-assignments.yml"
-        required: true
+        required: false
         type: string
       month:
         description: "Month to create (YYYY-MM). Leave blank for current month."
@@ -15,11 +15,11 @@ on:
         type: string
       due_date:
         description: "Due date (YYYY-MM-DD)"
-        required: true
+        required: false
         type: string
       priority:
         description: "Priority"
-        required: true
+        required: false
         type: choice
         options:
           - Low
@@ -29,7 +29,7 @@ on:
         default: Medium
       status:
         description: "Status"
-        required: true
+        required: false
         type: choice
         options:
           - Not Started
@@ -63,6 +63,35 @@ jobs:
           fi
           echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
 
+      - name: Set defaults for scheduled runs
+        id: defaults
+        shell: bash
+        run: |
+          ASSIGNMENT="${{ inputs.assignment }}"
+          DUE_DATE="${{ inputs.due_date }}"
+          PRIORITY="${{ inputs.priority }}"
+          STATUS="${{ inputs.status }}"
+
+          if [ -z "$ASSIGNMENT" ]; then
+            echo "ERROR: assignment is required for scheduled runs or manual dispatch."
+            exit 1
+          fi
+
+          if [ -z "$DUE_DATE" ]; then
+            DUE_DATE=$(date -u -d "+30 days" +%Y-%m-%d)
+          fi
+          if [ -z "$PRIORITY" ]; then
+            PRIORITY="Medium"
+          fi
+          if [ -z "$STATUS" ]; then
+            STATUS="Not Started"
+          fi
+
+          echo "assignment=$ASSIGNMENT" >> "$GITHUB_OUTPUT"
+          echo "due_date=$DUE_DATE" >> "$GITHUB_OUTPUT"
+          echo "priority=$PRIORITY" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
       - name: Load assignment from config
         id: assignment
         shell: bash
@@ -75,7 +104,7 @@ jobs:
             exit 1
           fi
 
-          INPUT="${{ inputs.assignment }}"
+          INPUT="${{ steps.defaults.outputs.assignment }}"
 
           CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/monthly-assignments.yml").to_json')
 
@@ -128,15 +157,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PERIOD: ${{ steps.period.outputs.period }}
-          INPUT_ASSIGNMENT: ${{ inputs.assignment }}
+          INPUT_ASSIGNMENT: ${{ steps.defaults.outputs.assignment }}
           ASSIGNMENT: ${{ steps.assignment.outputs.assignment_name }}
           PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
           PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
           CHECKER: ${{ steps.assignment.outputs.checker }}
           CHECKER2: ${{ steps.assignment.outputs.checker2 }}
-          DUE_DATE: ${{ inputs.due_date }}
-          PRIORITY: ${{ inputs.priority }}
-          STATUS: ${{ inputs.status }}
+          DUE_DATE: ${{ steps.defaults.outputs.due_date }}
+          PRIORITY: ${{ steps.defaults.outputs.priority }}
+          STATUS: ${{ steps.defaults.outputs.status }}
         shell: bash
         run: |
           if [ -z "${ASSIGNMENT}" ]; then
