@@ -5,10 +5,6 @@ on:
     - cron: "0 9 1 * *"  # 09:00 UTC on the 1st of every month
   workflow_dispatch:
     inputs:
-      assignment:
-        description: "Assignment key or name from config/monthly-assignments.yml"
-        required: false
-        type: string
       month:
         description: "Month to create (YYYY-MM). Leave blank for current month."
         required: false
@@ -46,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  create-monthly-issue:
+  create-monthly-issues:
     runs-on: ubuntu-latest
 
     steps:
@@ -67,15 +63,9 @@ jobs:
         id: defaults
         shell: bash
         run: |
-          ASSIGNMENT="${{ inputs.assignment }}"
           DUE_DATE="${{ inputs.due_date }}"
           PRIORITY="${{ inputs.priority }}"
           STATUS="${{ inputs.status }}"
-
-          if [ -z "$ASSIGNMENT" ]; then
-            echo "ERROR: assignment is required for scheduled runs or manual dispatch."
-            exit 1
-          fi
 
           if [ -z "$DUE_DATE" ]; then
             DUE_DATE=$(date -u -d "+30 days" +%Y-%m-%d)
@@ -87,13 +77,18 @@ jobs:
             STATUS="Not Started"
           fi
 
-          echo "assignment=$ASSIGNMENT" >> "$GITHUB_OUTPUT"
           echo "due_date=$DUE_DATE" >> "$GITHUB_OUTPUT"
           echo "priority=$PRIORITY" >> "$GITHUB_OUTPUT"
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
-      - name: Load assignment from config
-        id: assignment
+      - name: Create monthly issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PERIOD: ${{ steps.period.outputs.period }}
+          DUE_DATE: ${{ steps.defaults.outputs.due_date }}
+          PRIORITY: ${{ steps.defaults.outputs.priority }}
+          STATUS: ${{ steps.defaults.outputs.status }}
         shell: bash
         run: |
           set -euo pipefail
@@ -104,135 +99,93 @@ jobs:
             exit 1
           fi
 
-          INPUT="${{ steps.defaults.outputs.assignment }}"
+          CONFIG_JSON=$(ruby -rjson -e 'require "yaml"; puts YAML.load_file(ARGV[0]).to_json' "$CONFIG_PATH")
 
-          CONFIG_JSON=$(ruby -ryaml -rjson -e 'puts YAML.load_file("config/monthly-assignments.yml").to_json')
+          echo "$CONFIG_JSON" | jq -c '.assignments | to_entries[]' | while IFS= read -r entry; do
+            ASSIGNMENT_KEY=$(echo "$entry" | jq -r '.key')
+            ASSIGNMENT_DATA=$(echo "$entry" | jq -c '.value')
+            ASSIGNMENT_NAME=$(echo "$ASSIGNMENT_DATA" | jq -r '.name // empty')
+            if [ -z "$ASSIGNMENT_NAME" ]; then
+              ASSIGNMENT_NAME="$ASSIGNMENT_KEY"
+            fi
 
-          ASSIGNMENT_JSON=$(echo "$CONFIG_JSON" | jq -r --arg k "$INPUT" '(.assignments[$k]) // (.assignments[] | select(.name == $k)) // empty')
+            PROGRAMMER=$(echo "$ASSIGNMENT_DATA" | jq -r '.programmer // empty')
+            PROGRAMMER2=$(echo "$ASSIGNMENT_DATA" | jq -r '.programmer2 // empty')
+            CHECKER=$(echo "$ASSIGNMENT_DATA" | jq -r '.checker // empty')
+            CHECKER2=$(echo "$ASSIGNMENT_DATA" | jq -r '.checker2 // empty')
 
-          if [ -z "$ASSIGNMENT_JSON" ]; then
-            echo "ERROR: assignment '$INPUT' not found in $CONFIG_PATH"
-            exit 1
-          fi
+            if [ -z "$PROGRAMMER" ] || [ -z "$CHECKER" ]; then
+              echo "ERROR: assignment '$ASSIGNMENT_NAME' is missing PROGRAMMER and/or CHECKER."
+              exit 1
+            fi
 
-          PROGRAMMER=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer // empty')
-          PROGRAMMER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.programmer2 // empty')
-          CHECKER=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker // empty')
-          CHECKER2=$(echo "$ASSIGNMENT_JSON" | jq -r '.checker2 // empty')
-          ASSIGNMENT_NAME=$(echo "$ASSIGNMENT_JSON" | jq -r '.name // empty')
+            values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
+            non_empty_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | wc -l)
+            unique_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | sort -u | wc -l)
 
-          echo "programmer=$PROGRAMMER" >> "$GITHUB_OUTPUT"
-          echo "programmer2=$PROGRAMMER2" >> "$GITHUB_OUTPUT"
-          echo "checker=$CHECKER" >> "$GITHUB_OUTPUT"
-          echo "checker2=$CHECKER2" >> "$GITHUB_OUTPUT"
-          echo "assignment_name=$ASSIGNMENT_NAME" >> "$GITHUB_OUTPUT"
+            if [ "$unique_count" -ne "$non_empty_count" ]; then
+              echo "ERROR: assignment '$ASSIGNMENT_NAME' contains duplicate usernames among assigned roles."
+              exit 1
+            fi
 
-      - name: Validate assignments
-        shell: bash
-        env:
-          PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
-          PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
-          CHECKER: ${{ steps.assignment.outputs.checker }}
-          CHECKER2: ${{ steps.assignment.outputs.checker2 }}
-        run: |
-          # PROGRAMMER and CHECKER are required; programmer2/checker2 are optional.
-          if [ -z "$PROGRAMMER" ] || [ -z "$CHECKER" ]; then
-            echo "ERROR: PROGRAMMER and CHECKER must be set."
-            exit 1
-          fi
+            TITLE="Monthly Assignment - ${ASSIGNMENT_NAME} - ${PERIOD}"
 
-          values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
+            EXISTING=$(gh issue list \
+              --repo "$REPO" \
+              --state all \
+              --search "\"$TITLE\" in:title" \
+              --json number \
+              --jq 'length')
 
-          # Count non-empty values and unique non-empty values to detect duplicates among provided roles
-          non_empty_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | wc -l)
-          unique_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | sort -u | wc -l)
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Issue already exists: $TITLE"
+              continue
+            fi
 
-          if [ "$unique_count" -ne "$non_empty_count" ]; then
-            echo "ERROR: Provided roles must be unique (no duplicate usernames among programmer/programmer2/checker/checker2)."
-            exit 1
-          fi
+            assignees=("$PROGRAMMER")
+            if [ -n "$PROGRAMMER2" ]; then
+              assignees+=("$PROGRAMMER2")
+            fi
+            assignees+=("$CHECKER")
+            if [ -n "$CHECKER2" ]; then
+              assignees+=("$CHECKER2")
+            fi
+            ASSIGNEES_STR=$(IFS=,; echo "${assignees[*]}")
 
-      - name: Create monthly issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PERIOD: ${{ steps.period.outputs.period }}
-          INPUT_ASSIGNMENT: ${{ steps.defaults.outputs.assignment }}
-          ASSIGNMENT: ${{ steps.assignment.outputs.assignment_name }}
-          PROGRAMMER: ${{ steps.assignment.outputs.programmer }}
-          PROGRAMMER2: ${{ steps.assignment.outputs.programmer2 }}
-          CHECKER: ${{ steps.assignment.outputs.checker }}
-          CHECKER2: ${{ steps.assignment.outputs.checker2 }}
-          DUE_DATE: ${{ steps.defaults.outputs.due_date }}
-          PRIORITY: ${{ steps.defaults.outputs.priority }}
-          STATUS: ${{ steps.defaults.outputs.status }}
-        shell: bash
-        run: |
-          set -euo pipefail
+            BODY_FILE=$(mktemp)
+            trap 'rm -f "$BODY_FILE"' EXIT
 
-          if [ -z "${ASSIGNMENT}" ]; then
-            ASSIGNMENT="${INPUT_ASSIGNMENT}"
-          fi
+            cat > "$BODY_FILE" <<EOF
+            ## Monthly Assignment
+            Assignment: ${ASSIGNMENT_NAME}
+            Period: ${PERIOD}
 
-          TITLE="Monthly Assignment - ${ASSIGNMENT} - ${PERIOD}"
+            ## Metadata
+            | Field | Value |
+            |---|---|
+            | Assigned Date | $(date -u +%Y-%m-%d) |
+            | Due Date | ${DUE_DATE} |
+            | Status | ${STATUS} |
+            | Priority | ${PRIORITY} |
 
-          # Build assignee list without empty entries
-          assignees=()
-          assignees+=("${PROGRAMMER}")
-          if [ -n "${PROGRAMMER2}" ]; then
-            assignees+=("${PROGRAMMER2}")
-          fi
-          assignees+=("${CHECKER}")
-          if [ -n "${CHECKER2}" ]; then
-            assignees+=("${CHECKER2}")
-          fi
-          ASSIGNEES_STR=$(IFS=,; echo "${assignees[*]}")
+            ## Tasks
+            - [ ] Complete monthly assignment
+            - [ ] Programmer review
+            - [ ] Checker review
+            - [ ] Finalize
 
-          EXISTING=$(gh issue list \
-            --repo "$REPO" \
-            --state all \
-            --search "\"$TITLE\" in:title" \
-            --json number \
-            --jq 'length')
+            ## Notes
 
-          if [ "$EXISTING" -gt 0 ]; then
-            echo "Issue already exists: $TITLE"
-            exit 0
-          fi
+            ## Action Items
+            | Action | Owner | Due Date |
+            |---|---|---|
+            | | | |
+            EOF
 
-          BODY_FILE=$(mktemp)
-          trap 'rm -f "$BODY_FILE"' EXIT
-
-          cat > "$BODY_FILE" <<EOF
-          ## Monthly Assignment
-          Assignment: ${ASSIGNMENT}
-          Period: ${PERIOD}
-
-          ## Metadata
-          | Field | Value |
-          |---|---|
-          | Assigned Date | $(date -u +%Y-%m-%d) |
-          | Due Date | ${DUE_DATE} |
-          | Status | ${STATUS} |
-          | Priority | ${PRIORITY} |
-
-          ## Tasks
-          - [ ] Complete monthly assignment
-          - [ ] Programmer review
-          - [ ] Checker review
-          - [ ] Finalize
-
-          ## Notes
-
-          ## Action Items
-          | Action | Owner | Due Date |
-          |---|---|---|
-          | | | |
-          EOF
-
-          gh issue create \
-            --repo "$REPO" \
-            --title "$TITLE" \
-            --label "Monthly Assignment" \
-            --assignee "$ASSIGNEES_STR" \
-            --body-file "$BODY_FILE"
+            gh issue create \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --label "Monthly Assignment" \
+              --assignee "$ASSIGNEES_STR" \
+              --body-file "$BODY_FILE"
+          done
