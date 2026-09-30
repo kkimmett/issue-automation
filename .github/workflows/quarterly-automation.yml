@@ -196,9 +196,6 @@ jobs:
 Assignment: ${ASSIGNMENT}
 Quarter: ${PERIOD}
 
-## Team
-${TEAM_TABLE}
-
 ## Metadata
 | Field | Value |
 |---|---|
