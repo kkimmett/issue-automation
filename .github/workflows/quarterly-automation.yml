@@ -110,17 +110,23 @@ jobs:
           CHECKER: ${{ steps.assignment.outputs.checker }}
           CHECKER2: ${{ steps.assignment.outputs.checker2 }}
         run: |
-          values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
-          for v in "${values[@]}"; do
-            if [ -z "$v" ]; then
-              echo "ERROR: All assignment roles must be set."
-              exit 1
-            fi
-          done
+          # Validate required roles
+          if [ -z "$PROGRAMMER" ] || [ -z "$CHECKER" ]; then
+            echo "ERROR: programmer and checker roles are required."
+            exit 1
+          fi
 
-          unique=$(printf '%s\n' "${values[@]}" | sort -u | wc -l)
-          if [ "$unique" -ne 4 ]; then
-            echo "ERROR: The four roles must have different users."
+          # Build array of all provided roles (required + optional)
+          declare -a roles
+          roles+=("$PROGRAMMER")
+          [ -n "$PROGRAMMER2" ] && roles+=("$PROGRAMMER2")
+          roles+=("$CHECKER")
+          [ -n "$CHECKER2" ] && roles+=("$CHECKER2")
+
+          # Check for uniqueness among all provided roles
+          unique=$(printf '%s\n' "${roles[@]}" | sort -u | wc -l)
+          if [ "$unique" -ne "${#roles[@]}" ]; then
+            echo "ERROR: All roles must have different users."
             exit 1
           fi
 
@@ -158,23 +164,40 @@ jobs:
             exit 0
           fi
 
+          # Build assignee list, including only non-empty roles
+          ASSIGNEES=("$PROGRAMMER")
+          [ -n "$PROGRAMMER2" ] && ASSIGNEES+=("$PROGRAMMER2")
+          ASSIGNEES+=("$CHECKER")
+          [ -n "$CHECKER2" ] && ASSIGNEES+=("$CHECKER2")
+          ASSIGNEE_LIST=$(IFS=,; echo "${ASSIGNEES[*]}")
+
+          # Build team table with only non-empty roles
+          TEAM_TABLE="| Role | GitHub Username |
+|---|---|
+| Programmer | @${PROGRAMMER} |"
+          if [ -n "$PROGRAMMER2" ]; then
+            TEAM_TABLE+="
+| Programmer 2 | @${PROGRAMMER2} |"
+          fi
+          TEAM_TABLE+="
+| Checker | @${CHECKER} |"
+          if [ -n "$CHECKER2" ]; then
+            TEAM_TABLE+="
+| Checker 2 | @${CHECKER2} |"
+          fi
+
           gh issue create \
             --repo "$REPO" \
             --title "$TITLE" \
             --label "Quarterly Review" \
-            --assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
+            --assignee "$ASSIGNEE_LIST" \
             --body "$(cat <<EOF
 ## Quarterly Review
 Assignment: ${ASSIGNMENT}
 Quarter: ${PERIOD}
 
 ## Team
-| Role | GitHub Username |
-|---|---|
-| Programmer | @${PROGRAMMER} |
-| Programmer 2 | @${PROGRAMMER2} |
-| Checker | @${CHECKER} |
-| Checker 2 | @${CHECKER2} |
+${TEAM_TABLE}
 
 ## Metadata
 | Field | Value |
