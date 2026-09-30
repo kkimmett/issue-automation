@@ -99,6 +99,12 @@ jobs:
             exit 1
           fi
 
+          gh label create "Monthly Assignment" \
+            --repo "$REPO" \
+            --color "1D76DB" \
+            --description "Monthly assignment issues" \
+            --force
+
           CONFIG_JSON=$(ruby -rjson -e 'require "yaml"; puts YAML.load_file(ARGV[0]).to_json' "$CONFIG_PATH")
 
           echo "$CONFIG_JSON" | jq -c '.assignments | to_entries[]' | while IFS= read -r entry; do
