@@ -168,6 +168,8 @@ jobs:
           STATUS: ${{ steps.defaults.outputs.status }}
         shell: bash
         run: |
+          set -euo pipefail
+
           if [ -z "${ASSIGNMENT}" ]; then
             ASSIGNMENT="${INPUT_ASSIGNMENT}"
           fi
@@ -184,7 +186,7 @@ jobs:
           if [ -n "${CHECKER2}" ]; then
             assignees+=("${CHECKER2}")
           fi
-          ASSIGNEES_STR=$(IFS=, ; echo "${assignees[*]}")
+          ASSIGNEES_STR=$(IFS=,; echo "${assignees[*]}")
 
           EXISTING=$(gh issue list \
             --repo "$REPO" \
@@ -198,45 +200,39 @@ jobs:
             exit 0
           fi
 
-          # Build the team markdown table conditionally
-          TEAM_TABLE="| Role | GitHub Username |\n|---|---|\n| Programmer | @${PROGRAMMER} |"
-          if [ -n "${PROGRAMMER2}" ]; then
-            TEAM_TABLE="${TEAM_TABLE}\n| Programmer 2 | @${PROGRAMMER2} |"
-          fi
-          TEAM_TABLE="${TEAM_TABLE}\n| Checker | @${CHECKER} |"
-          if [ -n "${CHECKER2}" ]; then
-            TEAM_TABLE="${TEAM_TABLE}\n| Checker 2 | @${CHECKER2} |"
-          fi
+          BODY_FILE=$(mktemp)
+          trap 'rm -f "$BODY_FILE"' EXIT
+
+          cat > "$BODY_FILE" <<EOF
+          ## Monthly Assignment
+          Assignment: ${ASSIGNMENT}
+          Period: ${PERIOD}
+
+          ## Metadata
+          | Field | Value |
+          |---|---|
+          | Assigned Date | $(date -u +%Y-%m-%d) |
+          | Due Date | ${DUE_DATE} |
+          | Status | ${STATUS} |
+          | Priority | ${PRIORITY} |
+
+          ## Tasks
+          - [ ] Complete monthly assignment
+          - [ ] Programmer review
+          - [ ] Checker review
+          - [ ] Finalize
+
+          ## Notes
+
+          ## Action Items
+          | Action | Owner | Due Date |
+          |---|---|---|
+          | | | |
+          EOF
 
           gh issue create \
             --repo "$REPO" \
             --title "$TITLE" \
             --label "Monthly Assignment" \
             --assignee "$ASSIGNEES_STR" \
-            --body "$(cat <<EOF
-## Monthly Assignment
-Assignment: ${ASSIGNMENT}
-Period: ${PERIOD}
-
-## Metadata
-| Field | Value |
-|---|---|
-| Assigned Date | $(date -u +%Y-%m-%d) |
-| Due Date | ${DUE_DATE} |
-| Status | ${STATUS} |
-| Priority | ${PRIORITY} |
-
-## Tasks
-- [ ] Complete monthly assignment
-- [ ] Programmer review
-- [ ] Checker review
-- [ ] Finalize
-
-## Notes
-
-## Action Items
-| Action | Owner | Due Date |
-|---|---|---|
-| | | |
-EOF
-)"
+            --body-file "$BODY_FILE"
