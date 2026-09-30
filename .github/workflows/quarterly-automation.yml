@@ -2,7 +2,8 @@ name: Create Quarterly Issue
 
 on:
   schedule:
-    - cron: "0 9 1 1,4,7,10"  # 09:00 UTC on the first day of Jan, Apr, Jul, Oct
+    #- cron: "0 9 1 1,4,7,10"  # 09:00 UTC on the first day of Jan, Apr, Jul, Oct
+    - cron: "/30 * * * *" # Every 30 minutes 
   workflow_dispatch:
     inputs:
       assignment:
