@@ -106,17 +106,20 @@ jobs:
           CHECKER: ${{ steps.assignment.outputs.checker }}
           CHECKER2: ${{ steps.assignment.outputs.checker2 }}
         run: |
-          values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
-          for v in "${values[@]}"; do
-            if [ -z "$v" ]; then
-              echo "ERROR: All assignment roles must be set."
-              exit 1
-            fi
-          done
+          # PROGRAMMER and CHECKER are required; programmer2/checker2 are optional.
+          if [ -z "$PROGRAMMER" ] || [ -z "$CHECKER" ]; then
+            echo "ERROR: PROGRAMMER and CHECKER must be set."
+            exit 1
+          fi
 
-          unique=$(printf '%s\n' "${values[@]}" | sort -u | wc -l)
-          if [ "$unique" -ne 4 ]; then
-            echo "ERROR: The four roles must have different users."
+          values=("$PROGRAMMER" "$PROGRAMMER2" "$CHECKER" "$CHECKER2")
+
+          # Count non-empty values and unique non-empty values to detect duplicates among provided roles
+          non_empty_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | wc -l)
+          unique_count=$(printf '%s\n' "${values[@]}" | awk 'NF' | sort -u | wc -l)
+
+          if [ "$unique_count" -ne "$non_empty_count" ]; then
+            echo "ERROR: Provided roles must be unique (no duplicate usernames among programmer/programmer2/checker/checker2)."
             exit 1
           fi
 
@@ -142,6 +145,18 @@ jobs:
 
           TITLE="Monthly Assignment - ${ASSIGNMENT} - ${PERIOD}"
 
+          # Build assignee list without empty entries
+          assignees=()
+          assignees+=("${PROGRAMMER}")
+          if [ -n "${PROGRAMMER2}" ]; then
+            assignees+=("${PROGRAMMER2}")
+          fi
+          assignees+=("${CHECKER}")
+          if [ -n "${CHECKER2}" ]; then
+            assignees+=("${CHECKER2}")
+          fi
+          ASSIGNEES_STR=$(IFS=, ; echo "${assignees[*]}")
+
           EXISTING=$(gh issue list \
             --repo "$REPO" \
             --state all \
@@ -154,23 +169,28 @@ jobs:
             exit 0
           fi
 
+          # Build the team markdown table conditionally
+          TEAM_TABLE="| Role | GitHub Username |\n|---|---|\n| Programmer | @${PROGRAMMER} |"
+          if [ -n "${PROGRAMMER2}" ]; then
+            TEAM_TABLE="${TEAM_TABLE}\n| Programmer 2 | @${PROGRAMMER2} |"
+          fi
+          TEAM_TABLE="${TEAM_TABLE}\n| Checker | @${CHECKER} |"
+          if [ -n "${CHECKER2}" ]; then
+            TEAM_TABLE="${TEAM_TABLE}\n| Checker 2 | @${CHECKER2} |"
+          fi
+
           gh issue create \
             --repo "$REPO" \
             --title "$TITLE" \
             --label "Monthly Assignment" \
-            --assignee "$PROGRAMMER,$PROGRAMMER2,$CHECKER,$CHECKER2" \
+            --assignee "$ASSIGNEES_STR" \
             --body "$(cat <<EOF
 ## Monthly Assignment
 Assignment: ${ASSIGNMENT}
 Period: ${PERIOD}
 
 ## Team
-| Role | GitHub Username |
-|---|---|
-| Programmer | @${PROGRAMMER} |
-| Programmer 2 | @${PROGRAMMER2} |
-| Checker | @${CHECKER} |
-| Checker 2 | @${CHECKER2} |
+${TEAM_TABLE}
 
 ## Metadata
 | Field | Value |
