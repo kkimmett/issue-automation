@@ -54,48 +54,46 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-- name: Determine quarter
-  id: period
-  shell: bash
-  run: |
-    PERIOD="${{ inputs.quarter }}"
-    if [ -z "$PERIOD" ]; then
-      YEAR=$(date -u +%Y)
-      MONTH=$(date -u +%-m)
-      QUARTER=$(((MONTH - 1) / 3 + 1))
-      PERIOD="${YEAR}-Q${QUARTER}"
-    fi
-    echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
+      - name: Determine quarter
+        id: period
+        shell: bash
+        run: |
+          PERIOD="${{ inputs.quarter }}"
+          if [ -z "$PERIOD" ]; then
+            YEAR=$(date -u +%Y)
+            MONTH=$(date -u +%-m)
+            QUARTER=$(((MONTH - 1) / 3 + 1))
+            PERIOD="${YEAR}-Q${QUARTER}"
+          fi
+          echo "period=$PERIOD" >> "$GITHUB_OUTPUT"
 
-- name: Set defaults for scheduled runs
-  id: defaults
-  shell: bash
-  run: |
-    ASSIGNMENT="${{ inputs.assignment }}"
-    DUE_DATE="${{ inputs.due_date }}"
-    PRIORITY="${{ inputs.priority }}"
-    STATUS="${{ inputs.status }}"
-
-    # Provide defaults if empty (scheduled runs have no inputs)
-    if [ -z "$ASSIGNMENT" ]; then
-      ASSIGNMENT="default-assignment"  # Change to your actual default
-    fi
-    if [ -z "$DUE_DATE" ]; then
-      DUE_DATE=$(date -u -d "+30 days" +%Y-%m-%d)
-    fi
-    if [ -z "$PRIORITY" ]; then
-      PRIORITY="Medium"
-    fi
-    if [ -z "$STATUS" ]; then
-      STATUS="Not Started"
-    fi
-
-    echo "assignment=$ASSIGNMENT" >> "$GITHUB_OUTPUT"
-    echo "due_date=$DUE_DATE" >> "$GITHUB_OUTPUT"
-    echo "priority=$PRIORITY" >> "$GITHUB_OUTPUT"
-    echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-
-      
+        - name: Set defaults for scheduled runs
+          id: defaults
+          shell: bash
+          run: |
+            ASSIGNMENT="${{ inputs.assignment }}"
+            DUE_DATE="${{ inputs.due_date }}"
+            PRIORITY="${{ inputs.priority }}"
+            STATUS="${{ inputs.status }}"
+        
+            # Provide defaults if empty (scheduled runs have no inputs)
+            if [ -z "$ASSIGNMENT" ]; then
+              ASSIGNMENT="default-assignment"  # Change to your actual default
+            fi
+            if [ -z "$DUE_DATE" ]; then
+              DUE_DATE=$(date -u -d "+30 days" +%Y-%m-%d)
+            fi
+            if [ -z "$PRIORITY" ]; then
+              PRIORITY="Medium"
+            fi
+            if [ -z "$STATUS" ]; then
+              STATUS="Not Started"
+            fi
+        
+            echo "assignment=$ASSIGNMENT" >> "$GITHUB_OUTPUT"
+            echo "due_date=$DUE_DATE" >> "$GITHUB_OUTPUT"
+            echo "priority=$PRIORITY" >> "$GITHUB_OUTPUT"
+            echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
       - name: Load assignment from config
         id: assignment
